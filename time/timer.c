@@ -6,7 +6,6 @@
 
 #include "timer.h"
 
-
 #define TIMER_LIST_ADD(p_timer, g_timer) \
     do{ \
         list_add_tail(&p_timer->list, &g_timer.timer_list.list); \
@@ -25,8 +24,6 @@
 
 
 static int _loop_event_process();
-static int _monitor_process();
-int _timer_stop(timer_set_t* p_timer);
 
 
 int timer_init()
@@ -90,8 +87,7 @@ static int _loop_event_process()
 					}
 
 					if (0 == p_timer->run_time) {
-						//_timer_stop(p_timer);
-						g_timer.timer_running = 0;
+						//_timer_stop(p_timer);						
 					}
 				}
 			} else if(p_timer->run_time == -1) {
@@ -119,6 +115,8 @@ static int _loop_event_process()
 						       (p_timer->cb_end_time - p_timer->cb_start_time));
 					}
 				}
+			} else if (p_timer->run_time == 0) {
+				g_timer.timer_running = 0;
 			}
 		}
 		pthread_mutex_unlock(&g_timer.timer_lock);
@@ -138,7 +136,7 @@ int timer_add(int run_time	/* -1:循环运行; N(N>0):运行N次后停止 */
 	unsigned int curr_time_ms;
 	struct timespec ts = {0, 0};
 
-	if (g_timer.timer_running == 1) {
+	if (g_timer.timer_running) {
 		g_timer.timer_running = 0;
 	}
 
@@ -171,10 +169,10 @@ int timer_add(int run_time	/* -1:循环运行; N(N>0):运行N次后停止 */
 	return p_timer->handle;
 }
 
-int _timer_start(timer_set_t* p_timer)
+int timer_start(timer_set_t* p_timer)
 {
 	int ret = 0;
-	if (g_timer.timer_running != 1) {
+	if (!g_timer.timer_running) {
 		g_timer.timer_running = 1;
 	}
 
@@ -185,13 +183,20 @@ int _timer_start(timer_set_t* p_timer)
 	return ret;
 }
 
-int _timer_stop(timer_set_t* p_timer)
+int timer_del(timer_set_t* p_timer)
 {
 	TIMER_LIST_DEL(p_timer, g_timer);
 	return 0;
 }
 
-int timer_stop(int handle)
+void timer_stop()
+{
+	if (g_timer.timer_running) {
+		g_timer.timer_running = 0;
+	}
+}
+
+int timer_stop_all(int handle)
 {
 	pthread_mutex_lock(&g_timer.timer_lock);
 	timer_set_t* p_timer = NULL;

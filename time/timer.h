@@ -11,8 +11,6 @@
 #include "list.h"
 #include "thread.h"
 
-
-
 typedef int (*timer_cb)(void* param);
 
 #define		EVENT_PROCESS_NUM			1
@@ -60,7 +58,6 @@ typedef struct simple_timer_s
 } simple_timer_t;
 
 
-
 simple_timer_t g_timer;
 
 
@@ -91,7 +88,7 @@ int timer_add(int run_time, int interval, char* cb_func_name, timer_cb func,
  * 输出参数：无
  * 返回值  ：>=0-成功，<0-失败
  */
-int _timer_start(timer_set_t* p_timer);
+int timer_start(timer_set_t* p_timer);
 
 
 
@@ -104,7 +101,13 @@ int _timer_start(timer_set_t* p_timer);
 int timer_stop(int handle);
 
 
-int _timer_stop(timer_set_t* p_timer);
+/*
+ * 函数介绍：删除一个定时器
+ * 输入参数：handle: 定时器句柄
+ * 输出参数：无
+ * 返回值  ：>=0-成功，<0-失败
+ */
+int timer_del(timer_set_t* p_timer);
 
 
 #endif // __TIMER_H__

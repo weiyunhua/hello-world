@@ -43,14 +43,7 @@ int main()
 		return -1;
 	}
 
-
-	
-
-	ret = user_stop(&nTimerID_2);
-	if (ret < 0) {
-		printf("user timer stop failed!\n");
-		return -1;
-	}
+	user_stop(&nTimerID_2);
 
 	return 0;
 }

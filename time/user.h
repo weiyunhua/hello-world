@@ -5,9 +5,6 @@
 #include "list.h"
 #include "thread.h"
 
-simple_timer_t g_timer;
-
-
 /*
  * 函数介绍：用户控制初始化定时器模块(主控模块初始化一次即可)
  * 输入参数：无
