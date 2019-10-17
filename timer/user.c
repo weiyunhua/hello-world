@@ -2,6 +2,7 @@
 
 #include "user.h"
 
+
 static int check_head_addr(timer_set_t* p_timer)
 {
 	if (TIMER_LIST_HEAD_ADDR == p_timer) {
@@ -21,7 +22,7 @@ int user_init()
 		printf("User init timer faild!\n");
 	}
 
-	printf("User init sucess!\n");
+	printf("User init timer sucess!\n");
 
 	return ret;
 }
@@ -37,7 +38,7 @@ int user_add(int run_time	/* -1: 循环运行; N(N>0):运行N次后停止 */
 		printf("Add timer faild!\n");
 	}
 
-	printf("User add handle: %d\n", handle);
+	printf("User add timer's handle is %d\n", handle);
 	
 	return handle;
 }
@@ -45,7 +46,7 @@ int user_add(int run_time	/* -1: 循环运行; N(N>0):运行N次后停止 */
 
 int user_del(int* handle)
 {
-	printf("User delete handle: %d\n", *handle);
+	printf("User delete timer's handle is %d\n", *handle);
 
 	int ret = 0;
 	timer_set_t* p_timer = NULL;
@@ -67,7 +68,7 @@ int user_del(int* handle)
 
 int user_start(int* handle)
 {
-	printf("User start handle: %d\n", *handle);
+	printf("User start timer's handle is %d\n", *handle);
 
 	int ret = 0;
 	timer_set_t* p_timer = NULL;
@@ -76,7 +77,7 @@ int user_start(int* handle)
 	if (-1 != *handle) {
 		list_for_each_entry_safe(p_timer, p_next, &g_timer.timer_list.list, list) {
 			if (*handle == p_timer->handle) {
-				ret = timer_start();
+				ret = timer_start(p_timer);
 				break;
 			}
 		}
@@ -89,22 +90,11 @@ int user_start(int* handle)
 
 int user_stop(int* handle)
 {
-	printf("User stop handle: %d\n", *handle);
+	printf("User stop timer's handle is %d\n", *handle);
 
 	int ret = 0;
-	timer_set_t* p_timer = NULL;
-	timer_set_t* p_next  = NULL;
 
-	if (-1 != *handle) {
-		list_for_each_entry_safe(p_timer, p_next, &g_timer.timer_list.list, list) {
-			if (*handle == p_timer->handle) {
-				timer_stop();
-				break;
-			}
-		}
-
-		ret = check_head_addr(p_timer);
-	}
+	ret = timer_stop(*handle);
 
 	return ret;
 }
@@ -112,7 +102,7 @@ int user_stop(int* handle)
 
 int user_ch_time(int* handle, int* interval)
 {
-	printf("User change handle: %d, interval: %d\n", *handle, *interval);
+	printf("User change timer's handle is %d, interval is %d\n", *handle, *interval);
 
 	int ret = 0;
 	timer_set_t* p_timer = NULL;

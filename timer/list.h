@@ -1,7 +1,6 @@
 #ifndef _LINUX_LIST_H
 #define _LINUX_LIST_H
 
-
 /*
    prefetch(x) attempts to pre-emptively get the memory pointed to
    by address "x" into the CPU L1 cache.

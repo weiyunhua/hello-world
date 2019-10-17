@@ -4,23 +4,12 @@
 #include "list.h"
 #include "thread.h"
 
+
 typedef int (*timer_cb)(void* param);
 
 #define		EVENT_PROCESS_NUM			1
 #define		BASE_HANDEL					100
 #define		TIMER_LIST_HEAD_ADDR 		(timer_set_t *)(&g_timer.timer_list.list)
-
-
-// 以下宏定义为timer_ioctrl()的cmd类型
-typedef enum
-{
-	TIMER_CMD_GETTMCOUNT = 0x00         // 获取当前启动的计数器个数
-	,   TIMER_CMD_GETTMPASST            // 获取当前定时器已经经过的时间(ms)
-	,   TIMER_CMD_GETTMREACH            // 获取当前定时器离到达的时间(ms)
-	,   TIMER_CMD_RESET_STARTTIME       // 重新设置当前定时器的开始时间(ms)
-	,   TIMER_CMD_BUIT
-} TIMER_CMD;
-
 
 typedef struct timer_set_s
 {
@@ -44,9 +33,7 @@ typedef struct simple_timer_s
 	int base_handle;
 	int timer_running;
 	int curr_task_hdl;
-	int timer_living;
 	pthread_t loop_tid[EVENT_PROCESS_NUM];
-	int monitor_running;
 	pthread_mutex_t timer_lock;
 } simple_timer_t;
 
@@ -75,43 +62,33 @@ int timer_init();
 int timer_add(int run_time, int interval, char* cb_func_name,
                  timer_cb func, void* param);
 
-/*
- * 函数介绍：开始一个定时器
- * 输入参数：无
- * 输出参数：无
- * 返回值  ：>=0-成功，<0-失败
- */
-int timer_start();
-
-
-/*
- * 函数介绍：停止一个定时器
- * 输入参数：无
- * 输出参数：无
- * 返回值  ：无
- */
-void timer_stop();
-
-
-/*
- * 函数介绍：停止主定时器上的所有定时器
- * 输入参数：handle: 定时器句柄
- * 输出参数：无
- * 返回值  ：>=0-成功，<0-失败
- */
-int timer_stop_all(int handle);
-
 
 /*
  * 函数介绍：删除一个定时器
- * 输入参数：handle: 定时器句柄
+ * 输入参数：p_timer: 具体定时器
  * 输出参数：无
  * 返回值  ：>=0-成功，<0-失败
  */
 int timer_del(timer_set_t* p_timer);
 
 
+/*
+ * 函数介绍：开始一个定时器
+ * 输入参数：p_timer: 具体定时器
+ * 输出参数：无
+ * 返回值  ：>=0-成功，<0-失败
+ */
+int timer_start(timer_set_t* p_timer);
+
+
+/*
+ * 函数介绍：停止主一个定时器
+ * 输入参数：handle: 定时器句柄
+ * 输出参数：无
+ * 返回值  ：>=0-成功，<0-失败
+ */
+int timer_stop(int handle);
+
+
 #endif // __TIMER_H__
-
-
 

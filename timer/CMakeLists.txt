@@ -1,4 +1,3 @@
-
 cmake_minimum_required(VERSION 2.8)
 PROJECT(MAIN)
 SET(CMAKE_SYSTEM_NAME linux)
