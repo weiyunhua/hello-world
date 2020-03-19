@@ -1,0 +1,16 @@
+1. download source code
+    https://sourceforge.net/projects/bochs/files/
+
+2. decompression
+    tar -zxvf bochs-2.x.x.tar.gz
+
+3. cd bochs-2.x.x
+
+4. config
+    ./configure --enable-debugger --enable-disasm
+
+5. make
+    error: /usr/bin/ld: gui/libgui.a(gtk_enh_dbg_osdep.o): undefined reference to symbo
+    solution: in Makefile line 92, find LIBS = XXX. add -lpthread in last! then implement make.
+
+6. make install
