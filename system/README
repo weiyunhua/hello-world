@@ -1,1 +1,32 @@
 this project is for opearting system code
+
+# 反汇编指令
+ndisasm -o 0x7c00 boot.bin > boot.txt
+
+# a_img.txt
+1. generate the boot.bin file
+    nasm boot.asm -o boot.bin
+
+2. create a.img
+    bximage a.img -q -fd -size=1.44
+
+3. write the boot.bin file to a.img
+    dd if=boot.bin of=a.img bs=512 count=1 conv=notrunc
+
+# install_bochsrc.txt
+1. download source code
+    https://sourceforge.net/projects/bochs/files/
+
+2. decompression
+    tar -zxvf bochs-2.x.x.tar.gz
+
+3. cd bochs-2.x.x
+
+4. config
+    ./configure --enable-debugger --enable-disasm
+
+5. make
+    error: /usr/bin/ld: gui/libgui.a(gtk_enh_dbg_osdep.o): undefined reference to symbo
+    solution: in Makefile line 92, find LIBS = XXX. add -lpthread in last! then implement make.
+
+6. make install
