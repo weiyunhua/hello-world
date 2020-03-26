@@ -5,12 +5,20 @@ jmp short start    ; 离 start 字节数不多，所以用 short 跳转就行
 nop                ; nop 占用一个字节
 
 define:            ; 定义栈空间的起始地址
-    BaseOfStack equ 0x7c00
+    BaseOfStack      equ 0x7c00
                    ; 定义常量：dx 定义占用内存空间, equ 定义不会占用内存空间
-    RootEntryOffset equ 19
+	BaseOfLoader     equ 0x9000
+	               ; 定义加载的内存地址
+    RootEntryOffset  equ 19
                    ; 目标扇区的偏移量
-    RootEntryLength equ 14
+    RootEntryLength  equ 14
                    ; 目标扇区的长度
+	EntryItemLength  equ 32
+	               ; 表示 32 个 byte
+    FatEntryOffset   equ 1
+	               ; Fat 表的起始地址
+    FatEntryLength   equ 9
+	               ; Fat 表的长度
 
 
 header:            ; offset 3
@@ -41,7 +49,6 @@ start:
     mov es, ax           ; 初始化寄存器
     mov sp, BaseOfStack  ; 栈顶指针地址为 0x7c00, 通过 sp 寄存器保存get
 
-    ; FindEntry func test
     mov ax, RootEntryOffset
     mov cx, RootEntryLength
     mov bx, Buf
@@ -56,32 +63,153 @@ start:
 
     cmp dx, 0
     jz output
+
+    ; FatVec func test
+    mov si, bx             ; 将起始地址放到 si 中去, 内存拷贝
+    mov di, EntryItem      ; 目标文件的目录项起始地址
+    mov cx, EntryItemLength
+
+    call MemCpy            ; 将 si 所指向的内存 cp 到 di 所指向的内存
+
+    mov ax, FatEntryLength
+    mov cx, [BPB_BytsPerSec]
+    mul cx
+    mov bx, BaseOfLoader
+    sub bx, ax              ; 减去 Fat 表所占的字节数, bx 表示 Fat 表的起始地址(目标地址)
+
+    mov ax, FatEntryOffset  ; ax 保存了逻辑扇区号
+    mov cx, FatEntryLength  ; cx 保存了要读取的扇区数
+
+    call ReadSector
+
+    mov cx, [EntryItem + 0x1A] ; 获取目标文件的起始处, 0x1A 代表偏移位置. cx 表示起始处的值
+
+    call FatVec
+
     jmp last
 
+    ; MemCpy func test
+    mov si, Target
+    mov di, si
+    ;add di, 2
+    sub di, 2
+    mov cx, TarLen
+
+    call MemCpy
+
 output:
-    mov bp, MsgStr_f     ; 参数设置, 将 bp 寄存器设置为 MsgStr_f 字符串
-    mov cx, MsgLen_f     ; 将 cx 寄存器设置为 MsgLen_f 长度
-    call Print
-
-    ; MemCmp func test
-    mov si, MsgStr       ; 将 MsgStr 赋值给 si
-    mov di, DEST         ; 将 DEST 赋值给 di
-    mov cx, MsgLen       ; 将 MsgLen 赋值给 cx
-
-    call MemCmp          ; 调用 MemCmp 函数
-
-    cmp cx, 0
-    jz label             ; 如果比较成功, 则跳转到 label 标签处
-    jmp last             ; 否则直接将 cpu 挂起
-
-label:
-    mov bp, MsgStr       ; 参数设置, 将 bp 寄存器设置为 MsgStr 字符串
-    mov cx, MsgLen       ; 将 cx 寄存器设置为 MsgLen 长度
+    mov bp, MsgStr       ; 参数设置, 将 bp 寄存器设置为 MsgStr_f 字符串
+	;add bp, 2
+    mov cx, MsgLen       ; 将 cx 寄存器设置为 MsgLen_f 长度
     call Print
 
 last:
     hlt
     jmp last
+
+; cx --> index 下标
+; bx --> fat table address 起始位置
+;
+; return:
+;     dx --> fat[index] fat表项值
+FatVec:
+    mov ax, cx
+    mov cl, 2          ; 判断下标是奇数还是偶数
+    div cl             ; ax 中保存余数和商
+
+    push ax
+
+    mov ah, 0
+    mov cx, 3          ; 内存的起始地址
+    mul cx
+    mov cx, ax         ; cx 寄存器保存了内存表项的位置
+
+    pop ax
+
+    cmp ah, 0          ; 判断余数
+    jz even            ; 偶数
+    jmp odd            ; 奇数
+
+even:    ; FatVec[j] = ( (Fat[i+1] & 0x0F) << 8 ) | Fat[i];
+    mov dx, cx           ; 将 index 赋值给 dx
+    add dx, 1            ; dx + 1 ==> Fat[i+1]
+    add dx, bx           ; dx 保存 Fat[i+1] 的地址
+    mov bp, dx           ; 借助 bp 取值
+    mov dl, byte [bp]    ; 取内存单元的字节
+    and dl, 0x0F         ; Fat[i+1] & 0x0F
+    shl dx, 8            ; (Fat[i+1] & 0x0F) << 8
+    add cx, bx           ; 表示 Fat[i] 内存地址
+    mov bp, cx
+    or dl, byte [bp]     ; 取内存单元的字节, 放在 dx 低 8 位
+    jmp return
+
+odd:     ; FatVec[j+1] = (Fat[i+2] << 4) | ( (Fat[i+1] >> 4) & 0x0F );
+    mov dx, cx
+    add dx, 2            ; dx + 2 ==> Fat[i+2]
+    add dx, bx           ; dx 保存 Fat[i+2] 的地址
+    mov bp, dx
+    mov dl, byte [bp]    ; 取内存单元的字节
+    mov dh, 0            ; dx 高 8 位全部赋值为 0
+    shl dx, 4            ; (Fat[i+2] << 4)
+    add cx, 1            ; Fat[i+1]
+    add cx, bx
+    mov bp, cx
+    mov cl, byte [bp]
+    shr cl, 4            ; (Fat[i+1] >> 4)
+    and cl, 0x0F         ; (Fat[i+1] >> 4) & 0x0F
+    mov ch, 0            ; 将 cx 高 8 位赋值为 0
+    or  dx, cx           ; 得到 FatVec[j+1]
+
+return:
+    ret
+
+; ds:si --> source
+; es:di --> destination
+; cx    --> length
+MemCpy:
+    push si
+    push di
+    push cx
+    push ax
+
+    cmp si, di            ; 比较 si && di 的地址大小
+
+    ja btoe               ; if( si > di), 从前向后复制
+
+    add si, cx            ; 将指针指向 si 末尾处
+    add di, cx            ; 将指针指向 di 末尾处
+    dec si                ; 将指针指向 si 最后一个字节处
+    dec di                ; 将指针指向 di 最后一个字节处
+
+    jmp etob              ; 从后向前复制
+
+btoe:
+    cmp cx, 0
+    jz done               ; 如果全部复制完, 则跳转到 done
+    mov al, [si]          ; 取目标字符串的单位字节存入 al 寄存器中
+    mov byte [di], al     ; 将 al 寄存器中的值存入 di 单位字节中
+    inc si                ; 取 si 向后一个地址处的内容
+    inc di                ; 到 si 向后一个地址处
+    dec cx                ; 需复制的长度 - 1
+    jmp btoe              ; 继续复制下一个字节
+
+etob:
+    cmp cx, 0
+    jz done
+    mov al, [si]
+    mov byte [di], al
+    dec si                ; 取 si 向前一个地址处的内容
+    dec di
+    dec cx                ; 需复制的长度 - 1
+    jmp etob
+
+done:
+    pop ax
+    pop cx
+    pop di
+    pop si
+
+    ret
 
 ; es:bx --> root entry offset address
 ; ds:si --> target string
@@ -153,6 +281,7 @@ noequal:
 ; es:bp --> string address
 ; cx    --> string length
 Print:
+    mov dx, 0             ; 将目标打印到 (0, 0) 处, 也就是左上角
     mov ax, 0x1301        ; 指定打印参数
     mov bx, 0x0007        ; 指定打印参数
     int 0x10              ; 执行 0x10 中断
@@ -213,13 +342,11 @@ read:
 
     ret
 
-MsgStr   db  "Hello, DTOS!"
+MsgStr   db  "NO LOADER ..."
 MsgLen   equ ($-MsgStr)        ; 当前地址 - MsgStr = 字符串长度
-DEST     db "Hello, DTOS?"
 Target   db "LOADER     "
 TarLen   equ ($-Target)
-MsgStr_f db  "No LOADER..."
-MsgLen_f equ ($-MsgStr_f)      ; 当前地址 - MsgStr_f = 字符串长度
+EntryItem times EntryItemLength db 0x00
 Buf:
     times 510-($-$$) db 0x00
     db 0x55, 0xaa
