@@ -64,7 +64,6 @@ start:
     cmp dx, 0
     jz output
 
-    ; FatVec func test
     mov si, bx             ; 将起始地址放到 si 中去, 内存拷贝
     mov di, EntryItem      ; 目标文件的目录项起始地址
     mov cx, EntryItemLength
@@ -82,24 +81,27 @@ start:
 
     call ReadSector
 
-    mov cx, [EntryItem + 0x1A] ; 获取目标文件的起始处, 0x1A 代表偏移位置. cx 表示起始处的值
+    mov dx, [EntryItem + 0x1A] ; 获取第一个扇区的位置, 0x1A 代表偏移位置. dx 表示起始处的值
+    mov si, BaseOfLoader       ; si 指向目标地址处
 
+loading:
+    mov ax, dx
+    add ax, 31
+    mov cx, 1           ; 连续读取1个扇区
+    push dx
+    push bx
+    mov bx, si
+    call ReadSector
+    pop bx
+    pop cx
     call FatVec
-
-    jmp last
-
-    ; MemCpy func test
-    mov si, Target
-    mov di, si
-    ;add di, 2
-    sub di, 2
-    mov cx, TarLen
-
-    call MemCpy
+    cmp dx, 0xFF7
+    jnb BaseOfLoader
+    add si, 512          ; 加载下一个目标地址处
+    jmp loading
 
 output:
     mov bp, MsgStr       ; 参数设置, 将 bp 寄存器设置为 MsgStr_f 字符串
-	;add bp, 2
     mov cx, MsgLen       ; 将 cx 寄存器设置为 MsgLen_f 长度
     call Print
 
@@ -167,11 +169,6 @@ return:
 ; es:di --> destination
 ; cx    --> length
 MemCpy:
-    push si
-    push di
-    push cx
-    push ax
-
     cmp si, di            ; 比较 si && di 的地址大小
 
     ja btoe               ; if( si > di), 从前向后复制
@@ -204,11 +201,6 @@ etob:
     jmp etob
 
 done:
-    pop ax
-    pop cx
-    pop di
-    pop si
-
     ret
 
 ; es:bx --> root entry offset address
@@ -219,8 +211,6 @@ done:
 ;       (dx != 0) ? exist : noexist
 ;          exist --> bx is the target entry
 FindEntry:
-    push di                  ; 函数中有用到 di, 因此入栈
-    push bp                  ; 函数中有用到 bp, 因此入栈
     push cx                  ; 需要反复用到 cx, 因此入栈
 
     mov dx, [BPB_RootEntCnt] ; 查找的最大值
@@ -231,7 +221,9 @@ find:
     jz noexist
     mov di, bx               ; bx 中保存的是根目录区的起始地址(第0项), 每一项前11个字节
     mov cx, [bp]             ; 取目标字符串的长度
+    push si
     call MemCmp
+    pop si
     cmp cx, 0
     jz exist
     add bx, 32                ; 表示对比失败, 那么指向下一项. 当前每项占32B, + 32
@@ -241,8 +233,6 @@ find:
 exist:
 noexist:
     pop cx
-    pop bp
-    pop di
 
     ret
 
@@ -253,9 +243,6 @@ noexist:
 ; return:
 ;        (cx ==0) ? equal : noequal
 MemCmp:
-    push si
-    push di
-    push ax               ; 因为 cx 作为返回值来使用, 因此不用保存其状态
 
 compare:
     cmp cx, 0
@@ -272,9 +259,6 @@ goon:
 
 equal:
 noequal:
-    pop ax
-    pop di
-    pop si
 
     ret
 
@@ -290,15 +274,9 @@ Print:
 
 ; no parameter              软驱复位函数
 ResetFloppy:
-    push ax
-    push dx
-
     mov ah, 0x00          ; 软驱复位
     mov dl, [BS_DrvNum]   ; 驱动器号, 0 代表 a 盘
     int 0x13              ; BIOS 中的软盘数据读取中断号
-
-    pop dx
-    pop ax
 
     ret
 
@@ -306,11 +284,6 @@ ResetFloppy:
 ; cx    --> 需要连续读取多少个扇区
 ; es:bx --> 读取的内存地址
 ReadSector:
-    push bx                ; 寄存器进栈
-    push cx
-    push dx
-    push ax
-
     call ResetFloppy       ; 软驱复位
 
     push bx                ; 下面改变了 bx 目标地址的值, 因此先 push
@@ -334,11 +307,6 @@ ReadSector:
 read:
     int 0x13                 ; 有可能读取失败
     jc read                  ; 失败重读
-
-    pop ax                   ; 寄存器出栈
-    pop dx
-    pop cx
-    pop bx
 
     ret
 

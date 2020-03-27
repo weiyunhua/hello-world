@@ -1,23 +1,34 @@
 .PHONY : all clean rebuild
 
-SRC := boot.asm
-OUT := boot.bin
+BOOT_SRC := boot.asm
+BOOT_OUT := boot.bin
+
+LOADER_SRC := loader.asm
+LOADER_OUT := loader
+
 IMG := data.img
+IMG_PATH := /mnt/mount
 
 RM := rm -rf
 
-all : $(OUT) $(IMG)
-	dd if=$(OUT) of=$(IMG) bs=512 count=1 conv=notrunc
-	@echo "Success!"
+all : $(IMG) $(BOOT_OUT) $(LOADER_OUT)
+	@echo "Build Success ==> D.T.OS!"
 
 $(IMG) :
 	bximage $@ -q -fd -size=1.44
 
-$(OUT) : $(SRC)
+$(BOOT_OUT) : $(BOOT_SRC)
 	nasm $^ -o $@
+	dd if=$@ of=$(IMG) bs=512 count=1 conv=notrunc
+
+$(LOADER_OUT) : $(LOADER_SRC)
+	nasm $^ -o $@
+	mount -o loop $(IMG) $(IMG_PATH)
+	cp $@ $(IMG_PATH)/$@
+	umount $(IMG_PATH)
 
 clean :
-	$(RM) $(IMG) $(OUT)
+	$(RM) $(IMG) $(BOOT_OUT) $(LOADER_OUT)
 
 rebuild :
 	@$(MAKE) clean
