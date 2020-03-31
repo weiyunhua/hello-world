@@ -3,8 +3,9 @@
 BOOT_SRC := boot.asm
 BOOT_OUT := boot.bin
 
-LOADER_SRC := loader.asm
-LOADER_OUT := loader
+LOADER_SRC  := loader.asm
+INCLUDE_SRC := inc.asm
+LOADER_OUT  := loader
 
 IMG := data.img
 IMG_PATH := /mnt/mount
@@ -21,10 +22,10 @@ $(BOOT_OUT) : $(BOOT_SRC)
 	nasm $^ -o $@
 	dd if=$@ of=$(IMG) bs=512 count=1 conv=notrunc
 
-$(LOADER_OUT) : $(LOADER_SRC)
-	nasm $^ -o $@
+$(LOADER_OUT) : $(LOADER_SRC) $(INCLUDE_SRC)
+	nasm $< -o $@
 	mount -o loop $(IMG) $(IMG_PATH)
-	cp $@ $(IMG_PATH)/$@
+	cp $@ $(IMG_PATH)/$@ -f
 	umount $(IMG_PATH)
 
 clean :
