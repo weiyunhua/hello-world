@@ -2,7 +2,7 @@
 
 org 0x9000
 
-jmp CODE16_SEGMENT
+jmp ENTRY_SEGMENT
 
 [section .gdt]           ; 定义 .gdt 代码段
 ; GDT definition
@@ -14,8 +14,10 @@ VIDEO_DESC      :   Descriptor     0xB8000,         0x07FFF,       DA_DRWA + DA_
 ; 显存段描述符                  显存的起始地址   0XBFFFF - 0XB8000 可读可写并且之前已经访问过了的, 32 位代码段
 DATA32_DESC     :   Descriptor        0,      Data32SegLen - 1,    DA_DR + DA_32
 ; 定义数据段, 用于定义只读数据
-STACK_DESC      :   Descriptor        0,        TopOfStackInit,    DA_DRW + DA_32
+STACK32_DESC    :   Descriptor        0,        TopOfStack32,      DA_DRW + DA_32
 ; 定义栈空间, 用于保护模式下的函数调用
+CODE16_DESC     :   Descriptor        0,            0xFFFF,        DA_C
+UPDATE_DESC     :   Descriptor        0,            0xFFFF,        DA_DRW
 ; GDT end
 
 GdtLen    equ   $ - GDT_ENTRY  ; 计算全局描述符段的长度
@@ -29,11 +31,12 @@ GdtPtr:                        ; 相当于 C 中的 struct
 Code32Selector   equ (0x0001 << 3) + SA_TIG + SA_RPL0
 VideoSelector    equ (0x0002 << 3) + SA_TIG + SA_RPL0
 Data32Selector   equ (0x0003 << 3) + SA_TIG + SA_RPL0
-StackSelector    equ (0x0004 << 3) + SA_TIG + SA_RPL0
-
+Stack32Selector  equ (0x0004 << 3) + SA_TIG + SA_RPL0
+Code16Selector   equ (0x0005 << 3) + SA_TIG + SA_RPL0
+UpdateSelector   equ (0x0006 << 3) + SA_TIG + SA_RPL0
 ; end of [section .gdt]
 
-TopOfStackInit   equ  0x7c00
+TopOfStack16   equ  0x7c00
 
 ; 定义数据段, 定义只读数据
 [section .dat]
@@ -48,12 +51,14 @@ Data32SegLen equ $ - DATA32_SEGMENT
 
 [section .s16]      ; 实模式的代码段
 [bits 16]
-CODE16_SEGMENT:
+ENTRY_SEGMENT:
     mov ax, cs      ; 初始化
     mov ds, ax
     mov es, ax
     mov ss, ax
-    mov sp, TopOfStackInit
+    mov sp, TopOfStack16
+
+    mov [BACK_TO_REAL_MODE + 3], ax ; 填入 cs 寄存器的值
 
     ; initialize GDT for 32 bits code segment
     mov esi, CODE32_SEGMENT
@@ -64,6 +69,16 @@ CODE16_SEGMENT:
     ; initialize GDT for 32 bits data segment
     mov esi, DATA32_SEGMENT
     mov edi, DATA32_DESC
+
+    call InitDescItem
+
+    mov esi, STACK32_SEGMENT
+    mov edi, STACK32_DESC
+
+    call InitDescItem
+
+    mov esi, CODE16_SEGMENT
+    mov edi, CODE16_DESC
 
     call InitDescItem
 
@@ -93,6 +108,28 @@ CODE16_SEGMENT:
     ; 5. jump to 32 bits code
     jmp dword Code32Selector : 0  ; 因为要刷新流水线, 因此需要用 jmp 跳转
 
+BACK_ENTRY_SEGMENT:
+    mov ax, cs
+    mov ds, ax
+    mov es, ax
+    mov ss, ax
+    mov sp, TopOfStack16
+
+    in al, 0x92
+    and al, 11111101b
+    out 0x92, al                    ; 关闭 A20 地址线
+
+    sti                             ; 打开中断
+
+    mov bp, HELLO_WORLD
+    mov cx, 12
+    mov dx, 0
+    mov ax, 0x1301
+    mov bx, 0x0007
+    int 0x10
+
+    jmp $
+
 ; esi    --> code segment label
 ; edi    --> descriptor label
 ; 根据代码段的标签来初始化对应段
@@ -112,19 +149,36 @@ InitDescItem:
 
     ret
 
+[section .s16]
+[bits 16]
+CODE16_SEGMENT:
+    mov ax, UpdateSelector
+    mov ds, ax                 ; 刷新寄存器
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+    mov ss, ax
+
+    mov eax, cr0
+    and al, 11111110b
+    mov cr0, eax                ; 退出保护模式, 进入实模式
+
+BACK_TO_REAL_MODE:
+    jmp 0 : BACK_ENTRY_SEGMENT  ; 跳转到16位实模式
+
+Code16SegLen     equ   $ - CODE16_SEGMENT
+
 [section .s32]
 [bits 32]
 CODE32_SEGMENT:
     mov ax, VideoSelector
     mov gs, ax                  ; 将显存段的基址放在 gs 寄存器中
 
-    ;mov edi, (80 * 12 +37) * 2 ; 需要写入的单位位置
-    ;mov ah, 0x0C               ; 显示的方式: 黑底红字
-    ;mov al, 'P'                ; 显示字符
-    ;mov [gs:edi], ax           ; 将显示字符写入到单位位置中去
-
-    mov ax, StackSelector       ; 32 位代码段必须定义全局栈空间
+    mov ax, Stack32Selector     ; 32 位代码段必须定义全局栈空间
     mov ss, ax
+
+    mov eax, TopOfStack32
+    mov esp, eax
 
     mov ax, Data32Selector
     mov ds, ax
@@ -143,7 +197,7 @@ CODE32_SEGMENT:
 
     call PrintString
 
-    jmp $
+    jmp Code16Selector : 0
 
 ; ds:ebp   --> string address
 ; bx       --> attribute
@@ -181,3 +235,11 @@ end:
     ret
 
 Code32SegLen   equ   $ - CODE32_SEGMENT
+
+[section .gs]
+[bits 32]
+STACK32_SEGMENT:
+    times 1024 * 4 db 0                 ; 预留 4k 空间
+
+Stack32SegLen equ $ - STACK32_SEGMENT
+TopOfStack32  equ Stack32SegLen - 1     ; 初始栈段位置: 栈界限
