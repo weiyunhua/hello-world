@@ -17,7 +17,11 @@ DATA32_DESC     :   Descriptor        0,      Data32SegLen - 1,    DA_DR + DA_32
 STACK32_DESC    :   Descriptor        0,        TopOfStack32,      DA_DRW + DA_32
 ; 定义栈空间, 用于保护模式下的函数调用
 CODE16_DESC     :   Descriptor        0,            0xFFFF,        DA_C
+; 16位保护模式
 UPDATE_DESC     :   Descriptor        0,            0xFFFF,        DA_DRW
+; 高速刷新缓存器
+TASK_A_LDT_DESC :   Descriptor        0,        TaskALdtLen - 1,   DA_LDT
+; 局部描述符 TASK A
 ; GDT end
 
 GdtLen    equ   $ - GDT_ENTRY  ; 计算全局描述符段的长度
@@ -34,6 +38,7 @@ Data32Selector   equ (0x0003 << 3) + SA_TIG + SA_RPL0
 Stack32Selector  equ (0x0004 << 3) + SA_TIG + SA_RPL0
 Code16Selector   equ (0x0005 << 3) + SA_TIG + SA_RPL0
 UpdateSelector   equ (0x0006 << 3) + SA_TIG + SA_RPL0
+TaskALdtSelector equ (0x0007 << 3) + SA_TIG + SA_RPL0
 ; end of [section .gdt]
 
 TopOfStack16   equ  0x7c00
@@ -64,23 +69,43 @@ ENTRY_SEGMENT:
     mov esi, CODE32_SEGMENT
     mov edi, CODE32_DESC
 
-    call InitDescItem
+    call InitDescItem               ; 初始化 CODE32_DESC 段基址
 
     ; initialize GDT for 32 bits data segment
     mov esi, DATA32_SEGMENT
     mov edi, DATA32_DESC
 
-    call InitDescItem
+    call InitDescItem               ; 初始化 DATA32_DESC 段基址
 
     mov esi, STACK32_SEGMENT
     mov edi, STACK32_DESC
 
-    call InitDescItem
+    call InitDescItem               ; 初始化 STACK32_DESC 段基址
 
     mov esi, CODE16_SEGMENT
     mov edi, CODE16_DESC
 
-    call InitDescItem
+    call InitDescItem               ; 初始化 CODE16_DESC 段基址
+
+    mov esi, TASK_A_LDT_ENTRY
+    mov edi, TASK_A_LDT_DESC
+
+    call InitDescItem               ; 初始化 TASK_A_LDT_DESC 段基址
+
+    mov esi, TASK_A_CODE32_SEGMENT
+    mov edi, TASK_A_CODE32_DESC
+
+    call InitDescItem               ; 初始化 TASK_A_CODE32_DESC 段基址
+
+    mov esi, TASK_A_DATA32_SEGMENT
+    mov edi, TASK_A_DATA32_DESC
+
+    call InitDescItem               ; 初始化 TASK_A_DATA32_DESC 段基址
+
+    mov esi, TASK_A_STACK32_SEGMENT
+    mov edi, TASK_A_STACK32_DESC
+
+    call InitDescItem               ; 初始化 TASK_A_STACK32_DESC 段基址
 
     ; initialize GDT pointer struct
     mov eax, 0
@@ -138,12 +163,12 @@ InitDescItem:
 
     mov eax, 0
     mov ax, cs
-    shl eax, 4                ; 将当前地址 << 4 位
-    add eax, esi              ; 得到 32 位段基地址
-    mov word [edi + 2], ax    ; 将 ax 所保存的值放到偏移 2 字节处
+    shl eax, 4                  ; 将当前地址 << 4 位
+    add eax, esi                ; 得到 32 位段基地址
+    mov word [edi + 2], ax      ; 将 ax 所保存的值放到偏移 2 字节处
     shr eax, 16
-    mov byte [edi + 4], al    ; 将第3个字节放到偏移为 4 的地方处
-    mov byte [edi + 7], ah    ; 将 32 位代码段基地址放到最高位处
+    mov byte [edi + 4], al      ; 将第3个字节放到偏移为 4 的地方处
+    mov byte [edi + 7], ah      ; 将 32 位代码段基地址放到最高位处
 
     pop eax
 
@@ -153,7 +178,7 @@ InitDescItem:
 [bits 16]
 CODE16_SEGMENT:
     mov ax, UpdateSelector
-    mov ds, ax                 ; 刷新寄存器
+    mov ds, ax                  ; 刷新寄存器
     mov es, ax
     mov fs, ax
     mov gs, ax
@@ -184,7 +209,7 @@ CODE32_SEGMENT:
     mov ds, ax
 
     mov ebp, DTOS_OFFSET         ; 指向目标字符串(保护模式是段内偏移地址)
-    mov bx, 0x0C                 ; 0C 代表以黑底红字来显示
+    mov bx, 0x0C                 ; 打印属性, 0C 代表以黑底红字来显示
     mov dh, 12                   ; 打印位置 行
     mov dl, 33                   ; 打印位置 列
 
@@ -197,7 +222,12 @@ CODE32_SEGMENT:
 
     call PrintString
 
-    jmp Code16Selector : 0
+    mov ax, TaskALdtSelector
+
+    lldt ax                      ; 加载局部描述符 TASK A
+
+    jmp TaskACode32Selector : 0  ; 跳转到 TASK A 代码段
+    ;jmp Code16Selector : 0
 
 ; ds:ebp   --> string address
 ; bx       --> attribute
@@ -243,3 +273,101 @@ STACK32_SEGMENT:
 
 Stack32SegLen equ $ - STACK32_SEGMENT
 TopOfStack32  equ Stack32SegLen - 1     ; 初始栈段位置: 栈界限
+
+; =============================================================
+;
+;                       Task A code segment
+;
+; =============================================================
+
+[section .task-a-ldt]
+; Task A LDT definition
+;                                      段基址,         段界限,               段属性
+TASK_A_LDT_ENTRY:
+TASK_A_CODE32_DESC  :    Descriptor        0,     TaskACode32SegLen - 1,     DA_C + DA_32
+TASK_A_DATA32_DESC  :    Descriptor        0,     TaskAData32SegLen - 1,     DA_DR + DA_32
+TASK_A_STACK32_DESC :    Descriptor        0,     TaskAStack32SegLen - 1,    DA_DRW + DA_32
+
+TaskALdtLen   equ  $ - TASK_A_LDT_ENTRY
+
+; Task A LDT Selector
+TaskACode32Selector  equ   (0x0000 << 3) + SA_TIL + SA_RPL0
+TaskAData32Selector  equ   (0x0001 << 3) + SA_TIL + SA_RPL0
+TaskAStack32Selector equ   (0x0002 << 3) + SA_TIL + SA_RPL0
+
+[section .task-a-dat]
+[bits 32]
+TASK_A_DATA32_SEGMENT:
+    TASK_A_STRING        db  "This is Task A!", 0
+    TASK_A_STRING_OFFSET equ TASK_A_STRING - $$
+
+TaskAData32SegLen  equ   $ - TASK_A_DATA32_SEGMENT
+
+[section .task-a-gs]
+[bits 32]
+TASK_A_STACK32_SEGMENT:
+    times 1024 db 0
+
+TaskAStack32SegLen equ   $ - TASK_A_STACK32_SEGMENT
+TaskATopOfStack32  equ   TaskAStack32SegLen - 1
+
+[section .task-a-s32]
+[bits 32]
+TASK_A_CODE32_SEGMENT:
+    mov ax, VideoSelector
+    mov gs, ax                   ; 初始化显存段
+
+    mov ax, TaskAStack32Selector
+    mov ss, ax                   ; 初始化栈空间
+
+    mov eax, TaskATopOfStack32
+    mov esp, eax                 ; 初始化栈顶指针
+
+    mov ax, TaskAData32Selector
+    mov ds, ax                   ; 初始化数据段
+
+    mov ebp, TASK_A_STRING_OFFSET
+    mov bx, 0x0C                 ; 设置打印属性
+    mov dh, 14                   ; 设置打印行数
+    mov dl, 29                   ; 设置打印列数
+
+    call TaskAPrintString
+
+    jmp Code16Selector : 0
+
+; ds:ebp   --> string address
+; bx       --> attribute
+; dx       --> dh : row, dl : col
+TaskAPrintString:
+    push ebp
+    push eax
+    push edi
+    push cx
+    push dx
+
+task_print:
+    mov cl, [ds:ebp]   ; 在 ebp 中取字符
+    cmp cl, 0
+    je task_end        ; 如果取到最后一个字符(0), 表示结束
+    mov eax, 80
+    mul dh             ; 80 * 对应行数 ==> (80 * 12)
+    add al, dl         ; + 列 ==> (80 * 12 +37)
+    shl eax, 1         ; << 1 ==> * 2 ==> (80 * 12 +37) * 2
+    mov edi, eax       ; 放到 edi 寄存器中去
+    mov ah, bl         ; 将 0C 放入 ah 中
+    mov al, cl         ; 将字符放入 al 中
+    mov [gs:edi], ax   ; 放入 gs:edi 寄存器中去
+    inc ebp            ; 下一个打印的字符
+    inc dl             ; 下一个字符打印的位置
+    jmp task_print
+
+task_end:
+    pop dx
+    pop cx
+    pop edi
+    pop eax
+    pop ebp
+
+    ret
+
+TaskACode32SegLen  equ   $ - TASK_A_CODE32_SEGMENT
