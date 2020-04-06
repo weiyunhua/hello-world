@@ -22,6 +22,8 @@ UPDATE_DESC     :   Descriptor        0,            0xFFFF,        DA_DRW
 ; 高速刷新缓存器
 TASK_A_LDT_DESC :   Descriptor        0,        TaskALdtLen - 1,   DA_LDT
 ; 局部描述符 TASK A
+FUNCTION_DESC   :   Descriptor        0,      FunctionSegLen - 1,  DA_C + DA_32
+
 ; GDT end
 
 GdtLen    equ   $ - GDT_ENTRY  ; 计算全局描述符段的长度
@@ -39,6 +41,7 @@ Stack32Selector  equ (0x0004 << 3) + SA_TIG + SA_RPL0
 Code16Selector   equ (0x0005 << 3) + SA_TIG + SA_RPL0
 UpdateSelector   equ (0x0006 << 3) + SA_TIG + SA_RPL0
 TaskALdtSelector equ (0x0007 << 3) + SA_TIG + SA_RPL0
+FunctionSelector equ (0x0008 << 3) + SA_TIG + SA_RPL0
 ; end of [section .gdt]
 
 TopOfStack16   equ  0x7c00
@@ -106,6 +109,11 @@ ENTRY_SEGMENT:
     mov edi, TASK_A_STACK32_DESC
 
     call InitDescItem               ; 初始化 TASK_A_STACK32_DESC 段基址
+
+    mov esi, FUNCTION_SEGMENT
+    mov edi, FUNCTION_DESC
+
+    call InitDescItem               ; 初始化 FUNCTION_DESC 段基址
 
     ; initialize GDT pointer struct
     mov eax, 0
@@ -193,46 +201,14 @@ BACK_TO_REAL_MODE:
 
 Code16SegLen     equ   $ - CODE16_SEGMENT
 
-[section .s32]
+[section .func]
 [bits 32]
-CODE32_SEGMENT:
-    mov ax, VideoSelector
-    mov gs, ax                  ; 将显存段的基址放在 gs 寄存器中
-
-    mov ax, Stack32Selector     ; 32 位代码段必须定义全局栈空间
-    mov ss, ax
-
-    mov eax, TopOfStack32
-    mov esp, eax
-
-    mov ax, Data32Selector
-    mov ds, ax
-
-    mov ebp, DTOS_OFFSET         ; 指向目标字符串(保护模式是段内偏移地址)
-    mov bx, 0x0C                 ; 打印属性, 0C 代表以黑底红字来显示
-    mov dh, 12                   ; 打印位置 行
-    mov dl, 33                   ; 打印位置 列
-
-    call PrintString
-
-    mov ebp, HELLO_WORLD_OFFSET
-    mov bx, 0x0C
-    mov dh, 13
-    mov dl, 31
-
-    call PrintString
-
-    mov ax, TaskALdtSelector
-
-    lldt ax                      ; 加载局部描述符 TASK A
-
-    jmp TaskACode32Selector : 0  ; 跳转到 TASK A 代码段
-    ;jmp Code16Selector : 0
+FUNCTION_SEGMENT:
 
 ; ds:ebp   --> string address
 ; bx       --> attribute
 ; dx       --> dh : row, dl : col
-PrintString:
+PrintStringFunc:
     push ebp
     push eax
     push edi
@@ -262,7 +238,47 @@ end:
     pop eax
     pop ebp
 
-    ret
+    retf
+
+PrintString      equ   PrintStringFunc - $$
+
+FunctionSegLen   equ   $ - FUNCTION_SEGMENT
+
+
+[section .s32]
+[bits 32]
+CODE32_SEGMENT:
+    mov ax, VideoSelector
+    mov gs, ax                  ; 将显存段的基址放在 gs 寄存器中
+
+    mov ax, Stack32Selector     ; 32 位代码段必须定义全局栈空间
+    mov ss, ax
+
+    mov eax, TopOfStack32
+    mov esp, eax
+
+    mov ax, Data32Selector
+    mov ds, ax
+
+    mov ebp, DTOS_OFFSET         ; 指向目标字符串(保护模式是段内偏移地址)
+    mov bx, 0x0C                 ; 打印属性, 0C 代表以黑底红字来显示
+    mov dh, 12                   ; 打印位置 行
+    mov dl, 33                   ; 打印位置 列
+
+    call FunctionSelector : PrintString
+
+    mov ebp, HELLO_WORLD_OFFSET
+    mov bx, 0x0C
+    mov dh, 13
+    mov dl, 31
+
+    call FunctionSelector : PrintString
+
+    mov ax, TaskALdtSelector
+
+    lldt ax                      ; 加载局部描述符 TASK A
+
+    jmp TaskACode32Selector : 0  ; 跳转到 TASK A 代码段
 
 Code32SegLen   equ   $ - CODE32_SEGMENT
 
@@ -331,43 +347,8 @@ TASK_A_CODE32_SEGMENT:
     mov dh, 14                   ; 设置打印行数
     mov dl, 29                   ; 设置打印列数
 
-    call TaskAPrintString
+    call FunctionSelector : PrintString
 
     jmp Code16Selector : 0
-
-; ds:ebp   --> string address
-; bx       --> attribute
-; dx       --> dh : row, dl : col
-TaskAPrintString:
-    push ebp
-    push eax
-    push edi
-    push cx
-    push dx
-
-task_print:
-    mov cl, [ds:ebp]   ; 在 ebp 中取字符
-    cmp cl, 0
-    je task_end        ; 如果取到最后一个字符(0), 表示结束
-    mov eax, 80
-    mul dh             ; 80 * 对应行数 ==> (80 * 12)
-    add al, dl         ; + 列 ==> (80 * 12 +37)
-    shl eax, 1         ; << 1 ==> * 2 ==> (80 * 12 +37) * 2
-    mov edi, eax       ; 放到 edi 寄存器中去
-    mov ah, bl         ; 将 0C 放入 ah 中
-    mov al, cl         ; 将字符放入 al 中
-    mov [gs:edi], ax   ; 放入 gs:edi 寄存器中去
-    inc ebp            ; 下一个打印的字符
-    inc dl             ; 下一个字符打印的位置
-    jmp task_print
-
-task_end:
-    pop dx
-    pop cx
-    pop edi
-    pop eax
-    pop ebp
-
-    ret
 
 TaskACode32SegLen  equ   $ - TASK_A_CODE32_SEGMENT

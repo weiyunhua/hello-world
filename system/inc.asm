@@ -9,8 +9,19 @@ DA_CR    equ    0x9A
 DA_CCO   equ    0x9C
 DA_CCOR  equ    0x9E
 
+; Segment Privilege
+DA_DPL0		equ	  0x00    ; DPL = 0
+DA_DPL1		equ	  0x20    ; DPL = 1
+DA_DPL2		equ	  0x40    ; DPL = 2
+DA_DPL3		equ	  0x60    ; DPL = 3
+
 ; Special Attribute
-DA_LDT   equ    0x82
+DA_LDT       equ    0x82
+DA_TaskGate  equ    0x85	; 任务门类型值
+DA_386TSS    equ	0x89	; 可用 386 任务状态段类型值
+DA_386CGate  equ	0x8C	; 386 调用门类型值
+DA_386IGate  equ	0x8E	; 386 中断门类型值
+DA_386TGate  equ	0x8F	; 386 陷阱门类型值
 
 ; Selector Attribute
 SA_RPL0    equ    0
