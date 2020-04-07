@@ -8,13 +8,13 @@ jmp ENTRY_SEGMENT
 ; GDT definition
 ;                                  段基址           段界限       段属性
 GDT_ENTRY       :   Descriptor        0,               0,          0
-CODE32_DESC     :   Descriptor        0,      Code32SegLen - 1,    DA_C + DA_32
+CODE32_DESC     :   Descriptor        0,      Code32SegLen - 1,    DA_C + DA_32 + DA_DPL3
 ;                                                                  32位可执行代码段
-VIDEO_DESC      :   Descriptor     0xB8000,         0x07FFF,       DA_DRWA + DA_32
+VIDEO_DESC      :   Descriptor     0xB8000,         0x07FFF,       DA_DRWA + DA_32 + DA_DPL3
 ; 显存段描述符                  显存的起始地址   0XBFFFF - 0XB8000 可读可写并且之前已经访问过了的, 32 位代码段
-DATA32_DESC     :   Descriptor        0,      Data32SegLen - 1,    DA_DR + DA_32
+DATA32_DESC     :   Descriptor        0,      Data32SegLen - 1,    DA_DR + DA_32 + DA_DPL3
 ; 定义数据段, 用于定义只读数据
-STACK32_DESC    :   Descriptor        0,        TopOfStack32,      DA_DRW + DA_32
+STACK32_DESC    :   Descriptor        0,        TopOfStack32,      DA_DRW + DA_32 + DA_DPL3
 ; 定义栈空间, 用于保护模式下的函数调用
 CODE16_DESC     :   Descriptor        0,            0xFFFF,        DA_C
 ; 16位保护模式
@@ -34,10 +34,10 @@ GdtPtr:                        ; 相当于 C 中的 struct
 
 ; GDT Selector
 ; CODE32_DESC 的选择子, 全局段描述符中的选择子地址 (下标 << 3), 属性 SA_TIG, 特权级 SA_RPL0
-Code32Selector   equ (0x0001 << 3) + SA_TIG + SA_RPL0
-VideoSelector    equ (0x0002 << 3) + SA_TIG + SA_RPL0
-Data32Selector   equ (0x0003 << 3) + SA_TIG + SA_RPL0
-Stack32Selector  equ (0x0004 << 3) + SA_TIG + SA_RPL0
+Code32Selector   equ (0x0001 << 3) + SA_TIG + SA_RPL3
+VideoSelector    equ (0x0002 << 3) + SA_TIG + SA_RPL3
+Data32Selector   equ (0x0003 << 3) + SA_TIG + SA_RPL3
+Stack32Selector  equ (0x0004 << 3) + SA_TIG + SA_RPL3
 Code16Selector   equ (0x0005 << 3) + SA_TIG + SA_RPL0
 UpdateSelector   equ (0x0006 << 3) + SA_TIG + SA_RPL0
 TaskALdtSelector equ (0x0007 << 3) + SA_TIG + SA_RPL0
@@ -139,7 +139,13 @@ ENTRY_SEGMENT:
     mov cr0, eax
 
     ; 5. jump to 32 bits code
-    jmp dword Code32Selector : 0  ; 因为要刷新流水线, 因此需要用 jmp 跳转
+    ; jmp dword Code32Selector : 0  ; 因为要刷新流水线, 因此需要用 jmp 跳转
+    ; 如果是不同特权级间的跳转, 则需要下面 5 步; 如果是相同特权级间的跳转, 则 3、4、5 步等同于上面第5步 jmp 代码
+    push Stack32Selector          ; 1. 目标栈段选择子
+    push TopOfStack32             ; 2. 栈顶指针位置
+    push Code32Selector           ; 3. 目标代码段选择子
+    push 0                        ; 4. 目标代码段偏移位置
+    retf                          ; 5. 特权级跳转( 0 ==> 3 )
 
 BACK_ENTRY_SEGMENT:
     mov ax, cs
@@ -265,20 +271,59 @@ CODE32_SEGMENT:
     mov dh, 12                   ; 打印位置 行
     mov dl, 33                   ; 打印位置 列
 
-    call FunctionSelector : PrintString
+    ;call FunctionSelector : PrintString
+    call PrintString32
 
     mov ebp, HELLO_WORLD_OFFSET
     mov bx, 0x0C
     mov dh, 13
     mov dl, 31
 
-    call FunctionSelector : PrintString
+    ;call FunctionSelector : PrintString
+    call PrintString32
 
-    mov ax, TaskALdtSelector
+    jmp $
 
-    lldt ax                      ; 加载局部描述符 TASK A
+; ds:ebp   --> string address
+; bx       --> attribute
+; dx       --> dh : row, dl : col
+PrintString32:
+    push ebp
+    push eax
+    push edi
+    push cx
+    push dx
 
-    jmp TaskACode32Selector : 0  ; 跳转到 TASK A 代码段
+print32:
+    mov cl, [ds:ebp]   ; 在 ebp 中取字符
+    cmp cl, 0
+    je end32           ; 如果取到最后一个字符(0), 表示结束
+    mov eax, 80
+    mul dh             ; 80 * 对应行数 ==> (80 * 12)
+    add al, dl         ; + 列 ==> (80 * 12 +37)
+    shl eax, 1         ; << 1 ==> * 2 ==> (80 * 12 +37) * 2
+    mov edi, eax       ; 放到 edi 寄存器中去
+    mov ah, bl         ; 将 0C 放入 ah 中
+    mov al, cl         ; 将字符放入 al 中
+    mov [gs:edi], ax   ; 放入 gs:edi 寄存器中去
+    inc ebp            ; 下一个打印的字符
+    inc dl             ; 下一个字符打印的位置
+    jmp print32
+
+end32:
+    pop dx
+    pop cx
+    pop edi
+    pop eax
+    pop ebp
+
+    ret
+
+    ;mov ax, TaskALdtSelector
+
+    ;lldt ax                      ; 加载局部描述符 TASK A
+
+    ;jmp TaskACode32Selector : 0  ; 跳转到 TASK A 代码段
 
 Code32SegLen   equ   $ - CODE32_SEGMENT
 
