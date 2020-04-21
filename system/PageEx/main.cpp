@@ -6,15 +6,17 @@
 
 using namespace std;
 
-#define PAGE_NUM   (0xFF + 1)
-#define FRAME_NUM  (0x04)
-#define FP_NONE    (-1)
+#define PAGE_DIR_NUM   (0xF + 1)
+#define PAGE_SUB_NUM   (0xF + 1)
+#define PAGE_NUM       (PAGE_DIR_NUM * PAGE_SUB_NUM)
+#define FRAME_NUM      (0x04)
+#define FP_NONE        (-1)
 
 struct FrameItem
 {
     int pid;    // the task which use the frame
-    int pnum;   // the task which use frame hold
-    int ticks;
+    int pnum;   // the page which the frame hold
+    int ticks;  // the ticks to mark the usage frequency
 
     FrameItem()
     {
@@ -26,13 +28,13 @@ struct FrameItem
 
 class PageTable
 {
-    int m_pt[PAGE_NUM];
+    int* m_pt[PAGE_DIR_NUM];
 public:
     PageTable()
     {
-        for(int i=0; i<PAGE_NUM; i++)
+        for(int i=0; i<PAGE_DIR_NUM; i++)
         {
-            m_pt[i] = FP_NONE;
+            m_pt[i] = NULL;
         }
     }
 
@@ -40,18 +42,39 @@ public:
     {
         if( (0 <= i) && (i < length()) )
         {
-            return m_pt[i];
+            int dir = ((i & 0xF0) >> 4);
+            int spn = (i & 0x0F);
+
+            if( m_pt[dir] == NULL )
+            {
+                m_pt[dir] = new int[PAGE_SUB_NUM];
+
+                for(int k=0; k<PAGE_SUB_NUM; k++)
+                {
+                    m_pt[dir][k] = FP_NONE;
+                }
+            }
+
+            return m_pt[dir][spn];
         }
         else
         {
             QCoreApplication::exit(-1);
-            return m_pt[0];  // for avoid warning
+            return m_pt[0][0];  // for avoid warning
         }
     }
 
     int length()
     {
         return PAGE_NUM;
+    }
+
+    ~PageTable()
+    {
+        for(int i=0; i<PAGE_DIR_NUM; i++)
+        {
+            delete[] m_pt[i];
+        }
     }
 };
 
@@ -87,7 +110,7 @@ public:
         return m_pageTable;
     }
 
-    int GetNextPage()
+    int getNextPage()
     {
         int ret = m_next++;
 
@@ -164,11 +187,11 @@ void AccessPage(PCB& pcb)
 {
     int pid = pcb.getPID();
     PageTable& pageTable = pcb.getPageTable();
-    int page = pcb.GetNextPage();
+    int page = pcb.getNextPage();
 
     if( page != FP_NONE )
     {
-        PrintLog("Access Task" + QString::number(pid) + " for page" + QString::number(page));
+        PrintLog("Access Task" + QString::number(pid) + " for Page" + QString::number(page));
 
         if( pageTable[page] != FP_NONE )
         {
@@ -187,7 +210,7 @@ void AccessPage(PCB& pcb)
             }
             else
             {
-                PrintFatalError("Can NOT request page form disk...", pid, page);
+                PrintFatalError("Can NOT request page from disk...", pid, page);
             }
         }
 
@@ -209,7 +232,7 @@ int RequestPage(int pid, int page)
     }
     else
     {
-        PrintLog("No free to alloct, need to swap page out.");
+        PrintLog("No free frame to allocate, need to swap page out.");
 
         frame = SwapPage();
 
@@ -227,7 +250,7 @@ int RequestPage(int pid, int page)
 
     FrameTable[frame].pid = pid;
     FrameTable[frame].pnum = page;
-    FrameTable[frame].pnum = 0xFF;
+    FrameTable[frame].ticks = 0xFF;
 
     MoveOut.enqueue(frame);
 
@@ -300,6 +323,8 @@ int LRU()
     PrintLog("Select the LRU frame page to swap content out: Frame" + QString::number(obj));
     PrintLog("Write the selected page content back to disk.");
 
+    ClearFrameItem(obj);
+
     return obj;
 }
 
@@ -366,7 +391,7 @@ int main(int argc, char *argv[])
     {
         for(int i=0; i<FRAME_NUM; i++)
         {
-            FrameTable[i].ticks++;
+            FrameTable[i].ticks--;
         }
 
         if( TaskTable.count() > 0 )
