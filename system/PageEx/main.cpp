@@ -1,30 +1,32 @@
 #include <QCoreApplication>
 #include <iostream>
 #include <QList>
+#include <QQueue>
 #include <ctime>
 
 using namespace std;
 
-#define PAGE_NUM  (0xFF + 1)
-#define FRAME_NUM (0x04)
-#define FP_NONE   (-1)
+#define PAGE_NUM   (0xFF + 1)
+#define FRAME_NUM  (0x04)
+#define FP_NONE    (-1)
 
 struct FrameItem
 {
     int pid;    // the task which use the frame
-    int pnum;   // the page which use frame hold
+    int pnum;   // the task which use frame hold
+    int ticks;
 
     FrameItem()
     {
         pid = FP_NONE;
         pnum = FP_NONE;
+        ticks = 0xFF;
     }
 };
 
 class PageTable
 {
     int m_pt[PAGE_NUM];
-
 public:
     PageTable()
     {
@@ -43,6 +45,7 @@ public:
         else
         {
             QCoreApplication::exit(-1);
+            return m_pt[0];  // for avoid warning
         }
     }
 
@@ -54,11 +57,11 @@ public:
 
 class PCB
 {
-    int m_pid;              // task id
-    PageTable m_pageTable;  // page table for the task
-    int* m_pageSerial;      // simulate the page serial access
-    int m_pageSerialCount;  // page access count
-    int m_next;             // the next page index to access
+    int m_pid;             // task id
+    PageTable m_pageTable; // page table for the task
+    int* m_pageSerial;     // simulate the page serial access
+    int m_pageSerialCount; // page access count
+    int m_next;            // the next page index to access
 public:
     PCB(int pid)
     {
@@ -84,7 +87,7 @@ public:
         return m_pageTable;
     }
 
-    int getNextPage()
+    int GetNextPage()
     {
         int ret = m_next++;
 
@@ -125,14 +128,21 @@ public:
 
 FrameItem FrameTable[FRAME_NUM];
 QList<PCB*> TaskTable;
+QQueue<int> MoveOut;
 
 int GetFrameItem();
 void AccessPage(PCB& pcb);
 int RequestPage(int pid, int page);
 int SwapPage();
+void ClearFrameItem(PCB& pcb);
+void ClearFrameItem(int frame);
+int Random();
+int FIFO();
+int LRU();
 void PrintLog(QString log);
 void PrintPageMap(int pid, int page, int frame);
 void PrintFatalError(QString s, int pid, int page);
+
 
 int GetFrameItem()
 {
@@ -154,11 +164,11 @@ void AccessPage(PCB& pcb)
 {
     int pid = pcb.getPID();
     PageTable& pageTable = pcb.getPageTable();
-    int page = pcb.getNextPage();
+    int page = pcb.GetNextPage();
 
     if( page != FP_NONE )
     {
-        PrintLog("Access Task" + QString::number(pid) + " for Page" + QString::number(page));
+        PrintLog("Access Task" + QString::number(pid) + " for page" + QString::number(page));
 
         if( pageTable[page] != FP_NONE )
         {
@@ -177,9 +187,11 @@ void AccessPage(PCB& pcb)
             }
             else
             {
-                PrintFatalError("Can NOT request page from disk...", pid, page);
+                PrintFatalError("Can NOT request page form disk...", pid, page);
             }
         }
+
+        FrameTable[pageTable[page]].ticks++;
     }
     else
     {
@@ -197,7 +209,7 @@ int RequestPage(int pid, int page)
     }
     else
     {
-        PrintLog("No free frame to allocate, need to swap page out.");
+        PrintLog("No free to alloct, need to swap page out.");
 
         frame = SwapPage();
 
@@ -215,20 +227,17 @@ int RequestPage(int pid, int page)
 
     FrameTable[frame].pid = pid;
     FrameTable[frame].pnum = page;
+    FrameTable[frame].pnum = 0xFF;
+
+    MoveOut.enqueue(frame);
 
     return frame;
 }
 
-int Random()
+void ClearFrameItem(int frame)
 {
-    // just random select
-    int obj = qrand() % FRAME_NUM;
-
-    PrintLog("Random select a frame to swap page content out: Frame" + QString::number(obj));
-    PrintLog("Write the selected page content back to disk.");
-
-    FrameTable[obj].pid = FP_NONE;
-    FrameTable[obj].pnum = FP_NONE;
+    FrameTable[frame].pid = FP_NONE;
+    FrameTable[frame].pnum= FP_NONE;
 
     for(int i=0, f=0; (i<TaskTable.count()) && !f; i++)
     {
@@ -236,7 +245,7 @@ int Random()
 
         for(int j=0; j<pt.length(); j++)
         {
-            if(pt[j] == obj )
+            if(pt[j] == frame)
             {
                 pt[j] = FP_NONE;
                 f = 1;
@@ -244,13 +253,71 @@ int Random()
             }
         }
     }
+}
+
+int Random()
+{
+    int obj = qrand() % FRAME_NUM;
+
+    PrintLog("Random select a frame to swap page content out: Frame" + QString::number(obj));
+    PrintLog("Write the selected page content back to disk.");
+
+    ClearFrameItem(obj);
+
+    return obj;
+}
+
+int FIFO()
+{
+    int obj = MoveOut.dequeue();
+
+    PrintLog("Select a frame to swap page content out: Frame" + QString::number(obj));
+    PrintLog("Write the selected page content back to disk.");
+
+    ClearFrameItem(obj);
+
+    return obj;
+}
+
+int LRU()
+{
+    int obj = 0;
+    int ticks = FrameTable[obj].ticks;
+    QString s = "";
+
+    for(int i=0; i<FRAME_NUM; i++)
+    {
+        s += "Frame" + QString::number(i) + " : " + QString::number(FrameTable[i].ticks) + "    ";
+
+        if( ticks > FrameTable[i].ticks )
+        {
+            ticks = FrameTable[i].ticks;
+            obj = i;
+        }
+    }
+
+    PrintLog(s);
+    PrintLog("Select the LRU frame page to swap content out: Frame" + QString::number(obj));
+    PrintLog("Write the selected page content back to disk.");
 
     return obj;
 }
 
 int SwapPage()
 {
-    return Random();
+    return LRU();
+}
+
+void ClearFrameItem(PCB& pcb)
+{
+    for(int i=0; i<FRAME_NUM; i++)
+    {
+        if( FrameTable[i].pid == pcb.getPID() )
+        {
+            FrameTable[i].pid = FP_NONE;
+            FrameTable[i].pnum = FP_NONE;
+        }
+    }
 }
 
 void PrintLog(QString log)
@@ -262,20 +329,19 @@ void PrintPageMap(int pid, int page, int frame)
 {
     QString s = "Task" + QString::number(pid) + " : ";
 
-    s += "Page" + QString::number(page) + " ==> Frame" + QString::number(frame);
+    s += "Page " + QString::number(page) + " ==> Frame" + QString::number(frame);
 
     cout << s.toStdString() << endl;
 }
 
 void PrintFatalError(QString s, int pid, int page)
 {
-    s += " Task" + QString::number(pid) + ": Page" + QString::number(page);
+    s += "Task" + QString::number(pid) + ": Page" + QString::number(page);
 
     cout << s.toStdString() << endl;
 
     QCoreApplication::exit(-2);
 }
-
 
 int main(int argc, char *argv[])
 {
@@ -294,16 +360,39 @@ int main(int argc, char *argv[])
         TaskTable[i]->printPageSerial();
     }
 
-    PrintLog("==== Running ====");
+    PrintLog("====== Running ======");
 
     while( true )
     {
-        if( TaskTable[index]->running() )
+        for(int i=0; i<FRAME_NUM; i++)
         {
-            AccessPage(*TaskTable[index]);
+            FrameTable[i].ticks++;
         }
 
-        index = (index + 1) % TaskTable.count();
+        if( TaskTable.count() > 0 )
+        {
+            if( TaskTable[index]->running() )
+            {
+                AccessPage(*TaskTable[index]);
+            }
+            else
+            {
+                PrintLog("Task" + QString::number(TaskTable[index]->getPID()) + " is finished!");
+
+                PCB* pcb = TaskTable[index];
+
+                TaskTable.removeAt(index);
+
+                ClearFrameItem(*pcb);
+
+                delete pcb;
+            }
+        }
+
+        if( TaskTable.count() > 0 )
+        {
+            index = (index + 1) % TaskTable.count();
+        }
 
         cin.get();
     }
