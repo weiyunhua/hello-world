@@ -2,12 +2,12 @@
 
 PageDirBase0    equ 0x200000
 PageTblBase0    equ 0x201000
-PageDirBase1    equ 0x300000
-PageTblBase1    equ 0x301000
+PageDirBase1    equ 0x700000
+PageTblBase1    equ 0x701000
 
 ObjectAddrX     equ 0x401000
-TargetAddrY     equ 0x501000
-TargetAddrZ     equ 0x601000
+TargetAddrY     equ 0xD01000
+TargetAddrZ     equ 0xE01000
 
 org 0x9000
 jmp ENTRY_SEGMENT
@@ -23,7 +23,9 @@ PAGE_DIR_DESC0    :     Descriptor    PageDirBase0,       4095,          DA_DRW 
 PAGE_TBL_DESC0    :     Descriptor    PageTblBase0,       1023,          DA_DRW + DA_LIMIT_4K + DA_32
 PAGE_DIR_DESC1    :     Descriptor    PageDirBase1,       4095,          DA_DRW + DA_32
 PAGE_TBL_DESC1    :     Descriptor    PageTblBase1,       1023,          DA_DRW + DA_LIMIT_4K + DA_32
+FUNC32_DESC       :     Descriptor        0,        Func32SegLen - 1,    DA_DR + DA_32
 FLAT_MODE_RW_DESC :     Descriptor        0,             0xFFFFF,        DA_DRW + DA_LIMIT_4K + DA_32
+FLAT_MODE_C_DESC  :     Descriptor        0,             0xFFFFF,        DA_C + DA_LIMIT_4K + DA_32
 ; GDT end
 GdtLen    equ   $ - GDT_ENTRY
 GdtPtr:
@@ -38,7 +40,9 @@ PageDirSelector0    equ (0x0005 << 3) + SA_TIG + SA_RPL0
 PageTblSelector0    equ (0x0006 << 3) + SA_TIG + SA_RPL0
 PageDirSelector1    equ (0x0007 << 3) + SA_TIG + SA_RPL0
 PageTblSelector1    equ (0x0008 << 3) + SA_TIG + SA_RPL0
-FlatModeRWSelector  equ (0x0009 << 3) + SA_TIG + SA_RPL0
+Func32Selector      equ (0x0009 << 3) + SA_TIG + SA_RPL0
+FlatModeRWSelector  equ (0x000A << 3) + SA_TIG + SA_RPL0
+FlatModeCSelector   equ (0x000B << 3) + SA_TIG + SA_RPL0
 ; end of [section .gdt]
 
 
@@ -55,6 +59,46 @@ DATA32_SEGMENT:
     HELLO_WORLD_OFFSET equ HELLO_WORLD - $$
 
 Data32SegLen equ $ - DATA32_SEGMENT
+
+[section .func]
+[bits 32]
+FUNC32_SEGMENT:
+
+; cx --> n
+; return:
+;     eax --> n * n
+Sqr:
+    mov eax, 0
+
+    mov ax, cx
+    mul cx
+
+    retf
+
+SqrLen  equ $ - Sqr
+SqrFunc equ Sqr - $$
+
+
+; cx --> n
+; return:
+;     eax --> 1 + 2 + 3 + ... + n
+Acc:
+    push cx
+
+    mov eax, 0
+
+accloop:
+    add ax, cx
+    loop accloop
+
+    pop cx
+
+    retf
+
+AccLen  equ $ - Acc
+AccFunc equ Acc - $$
+
+Func32SegLen  equ  $ - FUNC32_SEGMENT
 
 [section .s16]
 [bits 16]
@@ -78,6 +122,11 @@ ENTRY_SEGMENT:
 
     mov esi, STACK32_SEGMENT
     mov edi, STACK32_DESC
+
+    call InitDescItem
+
+    mov esi, FUNC32_SEGMENT
+    mov edi, FUNC32_DESC
 
     call InitDescItem
 
@@ -138,21 +187,33 @@ CODE32_SEGMENT:
     mov eax, TopOfStack32
     mov esp, eax
 
-    mov ax, Data32Selector
+    mov ax, Func32Selector
     mov ds, ax
 
     mov ax, FlatModeRWSelector
     mov es, ax
 
-    mov esi, DTOS_OFFSET
+    ; mov esi, DTOS_OFFSET
+    ; mov edi, TargetAddrY
+    ; mov ecx, DTOS_LEN
+
+    ; call MemCpy32
+
+    ; mov esi, HELLO_WORLD_OFFSET
+    ; mov edi, TargetAddrZ
+    ; mov ecx, HELLO_WORLD_LEN
+
+    ; call MemCpy32
+
+    mov esi, SqrFunc
     mov edi, TargetAddrY
-    mov ecx, DTOS_LEN
+    mov ecx, SqrLen
 
     call MemCpy32
 
-    mov esi, HELLO_WORLD_OFFSET
+    mov esi, AccFunc
     mov edi, TargetAddrZ
-    mov ecx, HELLO_WORLD_LEN
+    mov ecx, AccLen
 
     call MemCpy32
 
@@ -169,24 +230,50 @@ CODE32_SEGMENT:
     call InitPageTable
 
     mov eax, ObjectAddrX   ; 0x401000
-    mov ebx, TargetAddrY   ; 0x501000
+    mov ebx, TargetAddrY   ; 0xD01000
     mov ecx, PageDirBase0
 
     call MapAddress
 
     mov eax, ObjectAddrX   ; 0x401000
-    mov ebx, TargetAddrZ   ; 0x601000
+    mov ebx, TargetAddrZ   ; 0xE01000
     mov ecx, PageDirBase1
 
     call MapAddress
 
-    ; mov eax, PageDirBase0
+    mov eax, PageDirBase0
 
-    ; call SwitchPageTable
+    call SwitchPageTable
 
-    ; mov eax, PageDirBase1
+    mov ecx, 100
 
-    ; call SwitchPageTable
+    call FlatModeCSelector : ObjectAddrX
+
+    ; mov ax, FlatModeRWSelector
+    ; mov ds, ax
+    ; mov ebp, ObjectAddrX
+    ; mov bx, 0x0C
+    ; mov dh, 12
+    ; mov dl, 33
+
+    ; call PrintString
+
+    mov eax, PageDirBase1
+
+    call SwitchPageTable
+
+    mov ecx, 100
+
+    call FlatModeCSelector : ObjectAddrX
+
+    ; mov ax, FlatModeRWSelector
+    ; mov ds, ax
+    ; mov ebp, ObjectAddrX
+    ; mov bx, 0x0C
+    ; mov dh, 13
+    ; mov dl, 31
+
+    ; call PrintString
 
     jmp $
 
@@ -234,10 +321,10 @@ MapAddress:
 
     ret
 
-; es     --> flat mode selector
-; ds:esi --> source
-; es:edi --> destination
-; ecx    --> length
+; es    --> flat mode selector
+; ds:si --> source
+; es:di --> destination
+; cx    --> length
 MemCpy32:
     push esi
     push edi
